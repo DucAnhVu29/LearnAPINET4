@@ -26,24 +26,44 @@ namespace LearnAPI.Controllers
     public class AccountsController : ApiController
     {
         // GET: api/Accounts
-        public IEnumerable<Account> Get()
+        [HttpGet]
+        [Route("")]
+        public HttpResponseMessage Get()
         {
-            using (var context = new LearningEntities4())
+            HttpResponseMessage response;
+            if (checkSession())
             {
-                var data = context.Accounts.ToList();
-                return data;
+                using (var context = new LearningEntities4())
+                {
+                    var data = context.Accounts.ToList();
+                    response = Request.CreateResponse(HttpStatusCode.OK, data);
+                    response.Headers.CacheControl = new CacheControlHeaderValue();
+                    return response;
+                }
             }
+            response = Request.CreateResponse(HttpStatusCode.NotFound, "Please login to countinue");
+            response.Headers.CacheControl = new CacheControlHeaderValue();
+            return response;
         }
 
         // GET: api/Accounts/5
-
-        public Account Get(int id)
+        [HttpGet]
+        public HttpResponseMessage Get(int id)
         {
-            using (var context = new LearningEntities4())
+            HttpResponseMessage response;
+            if (checkSession())
             {
-                var data = context.Accounts.Where(x => x.ID == id).SingleOrDefault();
-                return data;
+                using (var context = new LearningEntities4())
+                {
+                    var data = context.Accounts.Where(x => x.ID == id).SingleOrDefault();
+                    response = Request.CreateResponse(HttpStatusCode.OK, data);
+                    response.Headers.CacheControl = new CacheControlHeaderValue();
+                    return response;
+                }
             }
+            response = Request.CreateResponse(HttpStatusCode.NotFound, "Please login to countinue");
+            response.Headers.CacheControl = new CacheControlHeaderValue();
+            return response;
         }
 
         // POST: api/Accounts
@@ -74,7 +94,7 @@ namespace LearnAPI.Controllers
         [Route("checkRole")]
         public HttpResponseMessage CheckRole()
         {
-            Account account = DecodeToken();
+            Account account = DecodeTokenHeader();
             if (account != null)
             {
                 HttpResponseMessage responseOK = Request.CreateResponse(HttpStatusCode.OK, account.role);
@@ -88,9 +108,40 @@ namespace LearnAPI.Controllers
         }
 
         // PUT: api/Accounts/5
-        public void Put(int id, [FromBody]string value)
+        public HttpResponseMessage Put(int id, [FromBody]Account value)
         {
-            
+            HttpResponseMessage response;
+
+            if (checkSession())
+            {
+                var account = DecodeTokenSession();
+                if(account.role == "admin")
+                {
+                    using (var context = new LearningEntities4())
+                    {
+                        var data = context.Accounts.Where(x => x.ID == id).SingleOrDefault();
+
+                        if(data != null)
+                        {
+                            data = value;
+                            context.SaveChanges();
+                            response = Request.CreateResponse(HttpStatusCode.OK, data);
+                            response.Headers.CacheControl = new CacheControlHeaderValue();
+                            return response;
+                        }
+
+                        response = Request.CreateResponse(HttpStatusCode.NotFound);
+                        response.Headers.CacheControl = new CacheControlHeaderValue();
+                        return response;
+                    }
+                }
+                response = Request.CreateResponse(HttpStatusCode.NotFound, "You are not authorize to update account info!");
+                response.Headers.CacheControl = new CacheControlHeaderValue();
+                return response;
+            }
+            response = Request.CreateResponse(HttpStatusCode.NotFound, "Please login!");
+            response.Headers.CacheControl = new CacheControlHeaderValue();
+            return response;
         }
 
         // DELETE: api/Accounts/5
@@ -101,6 +152,7 @@ namespace LearnAPI.Controllers
 
         // LOGIN
         [HttpPost]
+        [AllowAnonymous]
         [Route("login")]
         public HttpResponseMessage Login([FromBody] Account account)
         {
@@ -115,26 +167,46 @@ namespace LearnAPI.Controllers
 
             using(var context = new LearningEntities4())
             {
+                HttpResponseMessage response;
                 var data = context.Accounts.Where(x => x.Password.Equals(pswTemp) && x.Email.Equals(account.Email)).SingleOrDefault();
                 if (data != null)
                 {
-                    Object responseData = new {account = data , token = GetToken(data), message = "Login successfully!"};
-                    HttpResponseMessage response = Request.CreateResponse(HttpStatusCode.OK, responseData);
+                    string jwtToken = GetToken(data);
+                    if(jwtToken != null)
+                    {
+                        //var session = HttpContext.Current.Session;
+                        //Session["token"] = jwtToken;
+                        HttpContext.Current.Session["token"] = jwtToken;
+                        HttpContext.Current.Session["account"] = data;
+                        Object responseData = new { account = data, token = jwtToken, message = "Login successfully!" };
+                        response = Request.CreateResponse(HttpStatusCode.OK, responseData);
+                        response.Headers.CacheControl = new CacheControlHeaderValue();
+                        return response;
+                    }
+                    response = Request.CreateResponse(HttpStatusCode.NotFound, "Please try again");
                     response.Headers.CacheControl = new CacheControlHeaderValue();
                     return response;
+
                 } else
                 {
                     Object responseData = new { account = data, message = "Incorrect email or password!" };
-                    HttpResponseMessage response = Request.CreateResponse(HttpStatusCode.NotFound, responseData);
+                    response = Request.CreateResponse(HttpStatusCode.NotFound, responseData);
                     response.Headers.CacheControl = new CacheControlHeaderValue();
                     return response;
                 }
             }
         }
 
+        [HttpPost]
+        [Route("logout")]
+        public void Logout()
+        {
+            HttpContext.Current.Session.Clear();
+        }
+
         [HttpGet]
         [Route("checkEmail")]
-        public bool CheckEmail(string email)
+        public bool CheckEmailViaRequest(string email)
         {
             using(var content = new LearningEntities4())
             {
@@ -171,16 +243,22 @@ namespace LearnAPI.Controllers
             return jwt_token.ToString();
         }
 
-        public string GetHeaderToken()
+        private string GetHeaderToken()
         {
             string token = Request.Headers.Authorization.ToString();
             token = token.Replace("Bearer ", "");
             return token;
         }
 
-        public Account DecodeToken()
+        private string GetSessionToken()
+        {
+            return HttpContext.Current.Session["token"].ToString();
+        }
+
+        private Account DecodeTokenHeader()
         {
             string token = GetHeaderToken();
+
             var jwt_token = new JwtSecurityTokenHandler().ReadToken(token) as JwtSecurityToken;
             if(jwt_token != null)
             {
@@ -195,5 +273,33 @@ namespace LearnAPI.Controllers
             }
             return null;
         }
+
+        private Account DecodeTokenSession()
+        {
+            string token = GetSessionToken();
+            var jwt_token = new JwtSecurityTokenHandler().ReadToken(token) as JwtSecurityToken;
+            if (jwt_token != null)
+            {
+                var data = jwt_token.Claims.First(claim => claim.Type == "account").Value;
+                var time = jwt_token.Claims.First(claim => claim.Type == "exp").Value;
+
+                if (jwt_token.ValidTo > DateTime.Now)
+                {
+                    var account = JsonConvert.DeserializeObject<Account>(data);
+                    return account;
+                }
+            }
+            return null;
+        }
+
+        private bool checkSession()
+        {
+            if(HttpContext.Current.Session == null || HttpContext.Current.Session["token"] == null)
+            {
+                return false;
+            }
+            return true;
+        }
+
     }
 }
