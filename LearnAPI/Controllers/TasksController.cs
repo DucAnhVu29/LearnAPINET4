@@ -60,8 +60,8 @@ namespace LearnAPI.Controllers
                 //data.Status = task.Status;
                 data.Name =  !string.IsNullOrEmpty(task.Name) ? task.Name : data.Name;
                 data.Description = !string.IsNullOrEmpty(task.Description) ? task.Description : data.Description;
-                data.StartDate = (task.StartDate == null) ? task.StartDate : data.StartDate;
-                data.DueDate = (task.DueDate == null) ? task.DueDate : data.DueDate;
+                data.StartDate = (task.StartDate != null) ? task.StartDate : data.StartDate;
+                data.DueDate = (task.DueDate != null) ? task.DueDate : data.DueDate;
                 data.Status = !string.IsNullOrEmpty(task.Status) ? task.Status : data.Status;
 
                 context.SaveChanges();
