@@ -19,6 +19,11 @@ using System.Security.Claims;
 using Newtonsoft.Json;
 using System.Web;
 using System.Web.Http.Cors;
+using System.IO;
+using LearnAPI.Models;
+using static LearnAPI.Models.ByteArrayPdfSplitter;
+using Syncfusion.Pdf.Parsing;
+using Syncfusion.Pdf;
 
 namespace LearnAPI.Controllers
 {
@@ -108,20 +113,20 @@ namespace LearnAPI.Controllers
         }
 
         // PUT: api/Accounts/5
-        public HttpResponseMessage Put(int id, [FromBody]Account value)
+        public HttpResponseMessage Put(int id, [FromBody] Account value)
         {
             HttpResponseMessage response;
 
             if (checkSession())
             {
                 var account = DecodeTokenSession();
-                if(account.role == "admin")
+                if (account.role == "admin")
                 {
                     using (var context = new LearningEntities4())
                     {
                         var data = context.Accounts.Where(x => x.ID == id).SingleOrDefault();
 
-                        if(data != null)
+                        if (data != null)
                         {
                             data = value;
                             context.SaveChanges();
@@ -165,14 +170,14 @@ namespace LearnAPI.Controllers
                 iterationCount: 100000,
                 numBytesRequested: 256 / 8));
 
-            using(var context = new LearningEntities4())
+            using (var context = new LearningEntities4())
             {
                 HttpResponseMessage response;
                 var data = context.Accounts.Where(x => x.Password.Equals(pswTemp) && x.Email.Equals(account.Email)).SingleOrDefault();
                 if (data != null)
                 {
                     string jwtToken = GetToken(data);
-                    if(jwtToken != null)
+                    if (jwtToken != null)
                     {
                         //var session = HttpContext.Current.Session;
                         //Session["token"] = jwtToken;
@@ -208,15 +213,66 @@ namespace LearnAPI.Controllers
         [Route("checkEmail")]
         public bool CheckEmailViaRequest(string email)
         {
-            using(var content = new LearningEntities4())
+            using (var content = new LearningEntities4())
             {
                 var data = content.Accounts.Where(x => x.Email.Equals(email)).SingleOrDefault();
-                if(data != null)
+                if (data != null)
                 {
                     return true;
-                }     
+                }
             }
             return false;
+        }
+
+        [HttpGet]
+        [Route("pdf")]
+        public HttpResponseMessage GetPdfFile(int pages, int skip)
+        {
+            string pdfFilePath = "C:\\Users\\Anh.Vu\\Desktop\\New folder\\pdf-succinctly.pdf";
+            byte[] bytes = System.IO.File.ReadAllBytes(pdfFilePath);
+
+            List<byte[]> result = new List<byte[]>();
+
+            result = SeperateAsPDF(bytes);
+
+            //using (MemoryStream memoryStream = new MemoryStream(bytes))
+            //{
+            //    using (PdfReader reader = new PdfReader(memoryStream))
+            //    {
+            //        PdfDocument docToSplit = new PdfDocument(reader);
+            //        ByteArrayPdfSplitter splitter = new ByteArrayPdfSplitter(docToSplit);
+            //        splitter.SplitByPageCount(1, new DocumentReadyListender(splitter, result));
+            //    }
+            //}
+
+            using (var context = new LearningEntities4())
+            {
+                HttpResponseMessage response;
+                response = Request.CreateResponse(HttpStatusCode.OK, bytes);
+                response.Headers.CacheControl = new CacheControlHeaderValue();
+                return response;
+            }
+        }
+
+        public static List<byte[]> SeperateAsPDF(byte[] myFile)
+        {
+            //Load document.  
+
+            PdfLoadedDocument loadedDocument = new PdfLoadedDocument(myFile);
+
+            List<byte[]> pdfBytes = new List<byte[]>();
+
+            for (int i = 0; i < loadedDocument.Pages.Count; i++)
+            {
+                MemoryStream stream = new MemoryStream();
+                PdfDocument doc = new PdfDocument();
+                doc.ImportPageRange(loadedDocument, i, i);
+                doc.Save(stream);
+                pdfBytes.Add(stream.ToArray());
+                stream.Dispose();
+            }
+            return pdfBytes;
+
         }
 
         public string GetToken(Account account)
